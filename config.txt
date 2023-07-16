@@ -1,0 +1,18 @@
+BEGIN open-blacklist
+/etc/passwd
+/etc/shadow
+END open-blacklist
+
+BEGIN read-blacklist
+-----BEGIN CERTIFICATE-----
+END read-blacklist
+
+BEGIN connect-blacklist
+www.nycu.edu.tw:4433
+google.com:80
+END connect-blacklist
+
+BEGIN getaddrinfo-blacklist
+www.ym.edu.tw
+www.nctu.edu.tw
+END getaddrinfo-blacklist
