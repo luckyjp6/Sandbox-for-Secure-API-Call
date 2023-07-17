@@ -25,13 +25,14 @@ void errquit(char *msg) {
     perror(msg);
     exit(0);
 }
-
+/*
 void print_Elf64_Sym(Elf64_Sym a) {
     printf("name: %x, bind: %d, type: %d, other: %d, section: %d, value: %lx, size: %ld\n", 
                 a.st_name, ELF64_ST_BIND(a.st_info), ELF64_ST_TYPE(a.st_info), a.st_other,
                 a.st_shndx, a.st_value, a.st_size
                 );
 }
+
 void print_section_type(Elf64_Shdr a) {
     switch(a.sh_type) {
         case 0 : printf("SHT_NULL\t"); break;
@@ -58,6 +59,7 @@ void print_section_type(Elf64_Shdr a) {
     }
     printf("\n");
 }
+*/
 
 void print_log(char *msg, size_t len) {
     int logger_fd;
@@ -69,23 +71,23 @@ void print_log(char *msg, size_t len) {
 }
 
 int config(const char *wanted, const char* func_name, uint16_t wanted_port) {
-    // get config file name
+    /* get the name of the configuration file */
     char* config_name = getenv("SANDBOX_CONFIG");
 
-    // open config
+    /* open the configuration file */
     int fd = open(config_name, O_RDONLY);
     char data[100000];
     read(fd, data, sizeof(data));
 
-    // prepare start & end
+    /* prepare start & end for desired function API */
     char begin[50]; sprintf(begin, "BEGIN %s-blacklist", func_name);
     char end[50]; sprintf(end, "END %s-blacklist", func_name);
     
-    // parse lines
-    int start = 0;
+    /* parse lines */
+    int start = 0; // check if we entered the part for desired function API
     char *d = data;
     while (d != NULL) {
-        char* now = strtok_r(d, "\n", &d);
+        char* now = strtok_r(d, "\r\n", &d);
         if (now == NULL) break;
         if (strcmp(now, begin) == 0) { start = 1; continue;}
         if (strcmp(now, end) == 0) break;
@@ -98,17 +100,16 @@ int config(const char *wanted, const char* func_name, uint16_t wanted_port) {
             if (strstr(wanted, now)) return -1;
         }
         else if (strcmp(func_name, "connect") == 0) {
-            // check port
+            /* check port */
             int get_port;
             char *host_name = strtok_r(now, ":", &now);
             sscanf(now, "%d", &get_port);
             if (get_port != wanted_port) continue;
             
-            // check addr
+            /*/ check addr */
             struct hostent *host = gethostbyname(host_name);            
             if (host == NULL) continue; //errquit("invalid host name");
             for (int i = 0; ; i++) {
-                // uint32_t get_ip = htonl(host->h_addr_list[i]);
                 char ip[INET_ADDRSTRLEN+2];
                 if (host->h_addr_list[i] == NULL) break;
                 sprintf(ip, "%d.%d.%d.%d", (uint8_t)host->h_addr_list[i][0], (uint8_t)host->h_addr_list[i][1], (uint8_t)host->h_addr_list[i][2], (uint8_t)host->h_addr_list[i][3]);
@@ -117,15 +118,16 @@ int config(const char *wanted, const char* func_name, uint16_t wanted_port) {
         }
     }
 
+    /* if no forbidden content is found, then we're safe */
     return 1;
 }
 
+/* for read function*/
 ssize_t get_count(int fd) {
     ssize_t now_count;
     char *now, env_name[50];
     sprintf(env_name, "READ_%d_COUNT", fd);
     now = getenv(env_name);
-    // printf("get %s %s\n", env_name, now);
     if (now == NULL) return 0;
     sscanf(now, "%ld", &now_count);
     return now_count;
@@ -135,21 +137,19 @@ void set_count(int fd, size_t c) {
     sprintf(env_name, "READ_%d_COUNT", fd);
     char count_chr[200];
     sprintf(count_chr, "%ld", c);
-    // printf("set %s %s\n", env_name, count_chr);
     setenv(env_name, count_chr, 1);
 }
 void add_count(int fd, size_t c) {
     ssize_t now_count = get_count(fd);
-    // printf("add %d -> %d\n", now_count, now_count + c);
     now_count += c;
     set_count(fd, now_count);
 }
 
 int my_open(const char *pathname, int flags, mode_t mode) {
-    // set mode
+    /* set mode */
     if (!((flags & O_CREAT) | (flags & O_TRUNC) | (flags & __O_TMPFILE))) mode = 0;
     
-    // get path
+    /* get path */
     int result = open(pathname, flags, mode);
     if (result > 0) {
         char link_name[10000] = {0}, file_name[10000] = {0};
@@ -163,7 +163,7 @@ int my_open(const char *pathname, int flags, mode_t mode) {
         }
     } 
 
-    // logger msg
+    /* logger msg */
     char logger_msg[log_msg_len];
     sprintf(logger_msg, "[logger] open(\"%s\", %d, %d) = %d\n", pathname, flags, mode, result);
     print_log(logger_msg, strlen(logger_msg));
@@ -172,25 +172,25 @@ int my_open(const char *pathname, int flags, mode_t mode) {
 }
 ssize_t my_read(int fd, void *buf, size_t count) {
     int result = read(fd, buf, count);
-    // get pid
+    /* get pid */
     int pid = getpid();
 
-    // check
+    /* check blacklist */
     if (result > 0) {
         char log_name[50];
         sprintf(log_name, "./%d-%d-read.log", pid, fd);
         int log = open(log_name, O_RDWR | O_CREAT, S_IRWXU);
         if (log < 0) errquit("open log");
-        // get current file content
+
+        /* get current file content */
         ssize_t now_count = get_count(fd);
         char tmp[50000] = {0};
         if (lseek(log, -now_count, SEEK_END) < 0) errquit("seek log");
-        // lseek(log, 0, SEEK_SET);
         if (read(log, tmp, now_count) < 0) errquit("read log");
         sprintf(tmp, "%s%s", tmp, (char *)buf);
-        // strcpy(tmp, buf);
 
-        // printf("\t##check(%ld): %s\n", now_count, tmp);
+        /* use all content that has been read to compare with the blacklist */
+        /* To-do: add maximum length for each line in blacklist -> speed up the comparison */
         if (config(tmp, "read", 0) > 0) {
             lseek(log, 0, SEEK_END);
             write(log, buf, result);
@@ -203,7 +203,7 @@ ssize_t my_read(int fd, void *buf, size_t count) {
         close(log);
     }
 
-    // logger message
+    /* logger message */
     char logger[log_msg_len];
     sprintf(logger, "[logger] read(%d, %p, %ld) = %d\n", fd, buf, count, result);
     print_log(logger, strlen(logger));
@@ -211,10 +211,10 @@ ssize_t my_read(int fd, void *buf, size_t count) {
     return result;
 }
 ssize_t my_write(int fd, void *buf, size_t count) {
-    // get pid
+    /* get pid */
     int pid = getpid();
 
-    // get file name
+    /* get file name */
     char file_name[50];
     sprintf(file_name, "./%d-%d-write.log", pid, fd);
     int log = open(file_name, O_WRONLY | O_CREAT | O_APPEND, S_IRWXU);
@@ -223,7 +223,7 @@ ssize_t my_write(int fd, void *buf, size_t count) {
     close(log);
     int result = write(fd, buf, count);
 
-    // logger message
+    /* logger message */
     char logger[log_msg_len];
     sprintf(logger, "[logger] write(%d, %p, %ld) = %d\n", fd, buf, count, result);
     print_log(logger, strlen(logger));
@@ -234,13 +234,13 @@ int my_conn(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     struct sockaddr_in addr_in;
     memcpy(&addr_in, addr, sizeof(struct sockaddr_in));
 
-    // prepare ip and port
+    /* prepare ip and port */
     char ip[INET_ADDRSTRLEN];
     uint16_t port;
     inet_ntop (AF_INET, &addr_in.sin_addr, ip, sizeof (ip));
     port = htons(addr_in.sin_port);
 
-    // check
+    /* check blacklist */
     int result;
     if (config(ip, "connect", port) > 0) result = connect(sockfd, addr, addrlen);
     else {
@@ -256,13 +256,13 @@ int my_conn(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     return result;
 }
 int my_getaddr (const char *restrict node, const char *restrict service, const struct addrinfo *restrict hints, struct addrinfo **restrict res){
-    // check
+    /* check blacklist */
     int result = getaddrinfo(node, service, hints, res);
     if (node != NULL) { if (config(node, "getaddrinfo", 0) < 0) result = EAI_NONAME; }
     if (service != NULL) { if (config(service, "getaddrinfo", 0) < 0) result = EAI_NONAME; }
     if (node == NULL && service == NULL) result = EAI_NONAME;
     
-    // logger message
+    /* logger message */
     char log_msg[log_msg_len];
     sprintf(log_msg, "[logger] getaddrinfo(\"%s\",\"%s\",%p,%p) = %d\n", node , "(null)", hints, res, result);
     print_log(log_msg, strlen(log_msg));
@@ -270,7 +270,7 @@ int my_getaddr (const char *restrict node, const char *restrict service, const s
     return result;
 }
 int my_sys (const char *command) {
-    // logger message
+    /* logger message */
     char log_msg[log_msg_len];
     sprintf(log_msg, "[logger] system(\"%s\")\n", command);
     print_log(log_msg, strlen(log_msg));
@@ -286,8 +286,7 @@ void get_write_previlage(long int addr) {
     uintptr_t ali = (uintptr_t)A;
     ali = ali & 0xfffffffff000;
     void *ali_ptr = (void *)ali;
-    // printf("expected: from %p to %p\n", addr, addr+0x1000);
-    // printf("actually requested: from %p ot %p\n", ali_ptr, ali_ptr + 0x1000);
+
     if (mprotect(ali_ptr, 0x1000, PROT_READ | PROT_WRITE | PROT_EXEC) < 0) errquit("mprotect failed");
 }
 void replace(unsigned long int addr, char* func) {
@@ -305,13 +304,13 @@ void parse_elf(const char* elf_file, long int start_addr) {
     int fd = open(elf_file, O_RDONLY);
     if (fd < 0) errquit("can't open elf file");
 
-    // read elf header
+    /* read elf header */
     read(fd, &header, sizeof(header));
 
-    // check valid
+    /* check valid */
     if (memcmp(header.e_ident, ELFMAG, SELFMAG) != 0) errquit("header invalid");
 
-    // get section header
+    /* get section header */
     int section_hdr_off = header.e_shoff;
     int section_hdr_num = header.e_shnum;
     Elf64_Shdr shdr[1000];
@@ -319,14 +318,12 @@ void parse_elf(const char* elf_file, long int start_addr) {
     if (lseek(fd, section_hdr_off, SEEK_SET) != section_hdr_off) errquit("section hdr seek");
     if (read(fd, &shdr, section_hdr_num*sizeof(Elf64_Shdr)) < 0) errquit("section hdr read");
     
-    // get section name table
+    /* get section name table */
     int name_idx = header.e_shstrndx;
     if (lseek(fd, shdr[name_idx].sh_offset, SEEK_SET) < 0) errquit("section name table seek");
     if (read(fd, name_table, shdr[name_idx].sh_size) < 0) errquit("section name table read");
     
-    // for (int i = 0; i < section_hdr_num; i++) { printf("%s\t", &name_table[shdr[i].sh_name]); print_section_type(shdr[i]);}
-
-    // get section idx
+    /* get section idx */
     int rela_plt_idx = -1, sym_table_idx = -1, str_table_idx = -1;
     for (int i = 0; i < section_hdr_num; i++) {
         if (strcmp(&name_table[shdr[i].sh_name], ".rela.plt") == 0) rela_plt_idx = i;
@@ -340,36 +337,25 @@ void parse_elf(const char* elf_file, long int start_addr) {
     if (sym_table_idx < 0) errquit(".dynsym not found");
     if (str_table_idx < 0) errquit(".dynstr not found");
 
-    // get section .dynsym
-    Elf64_Sym sym_name[10000];
-    // printf("####%x\n", shdr[sym_table_idx].sh_size);
+    /* get section .dynsym */
+    Elf64_Sym sym_name[10000]; // the offsets of the symbols' name
     if (lseek(fd, shdr[sym_table_idx].sh_offset, SEEK_SET) < 0) errquit(".dynsym seek");
     if (read(fd, &sym_name, shdr[sym_table_idx].sh_size) < 0) errquit(".dynsym read");
 
-    // get section .dynstr
+    /* get section .dynstr */
+    char names[200000] = {0}; // the names
     uint16_t name_off = sym_name[0].st_shndx;
-    // printf("name off: %d, shdr: %d\n", name_off, str_table_idx);
     if (lseek(fd, shdr[str_table_idx].sh_offset+name_off, SEEK_SET) < 0) errquit(".dynstr seek");
-    char names[200000] = {0};
     read(fd, names, sizeof(names));
-    // for (int i = 0; i < shdr[str_table_idx].sh_offset; i++) {
-    //     if (names[i] == 0) printf(" ");
-    //     if (names[i] < 'A' || names[i] > 'z') continue;
-    //     else 
-    //     printf("%c", names[i]);
-    // }
 
-    // get section .rela.plt
-    const uint64_t record_num = shdr[rela_plt_idx].sh_size/sizeof(Elf64_Rela);
-    // printf("rela plt num: %ld(%ld)\n", record_num, shdr[rela_plt_idx].sh_size);
+    /* get section .rela.plt */
     Elf64_Rela record[5000];
+    const uint64_t record_num = shdr[rela_plt_idx].sh_size/sizeof(Elf64_Rela);
     if (lseek(fd, shdr[rela_plt_idx].sh_offset, SEEK_SET) < 0) errquit(".rela.plt seek");
     if (read(fd, &record, shdr[rela_plt_idx].sh_size) < 0) errquit(".rela.plt read");
     
     int open_idx = -1, read_idx = -1, write_idx = -1, conn_idx = -1, getaddr_idx = -1, sys_idx = -1, close_idx = -1;
     for (int i = 0; i < record_num; i++) {
-        // printf("%s\n", names+sym_name[ELF64_R_SYM(record[i].r_info)].st_name);
-        // if (strstr(names+sym_name[ELF64_R_SYM(record[i].r_info)].st_name, "open") != NULL) printf("%s\n", names+sym_name[ELF64_R_SYM(record[i].r_info)].st_name);
         if (strcmp("open", names+sym_name[ELF64_R_SYM(record[i].r_info)].st_name) == 0) open_idx = i;
         if (strcmp("read", names+sym_name[ELF64_R_SYM(record[i].r_info)].st_name) == 0) read_idx = i;
         if (strcmp("write", names+sym_name[ELF64_R_SYM(record[i].r_info)].st_name) == 0) write_idx = i;
@@ -404,12 +390,10 @@ char* get_path(char *instruction, long int *start_addr) {
         sscanf(instruction, ".%s", ins_name);
         getcwd(cwd, sizeof(cwd));
         sprintf(instruction, "%s%s", cwd, ins_name);
-        // printf("%s\n", instruction);
     }
     while ((record = strtok_r(cnt, "\n\r", &cnt)) != NULL) {
         if (strstr(buf, instruction) == NULL) continue;
         // 55e2caf7c000-55e2caf7e000 r--p 00000000 08:20 1663 /usr/bin/cat
-        // printf("%s\n", buf);
         long int tt;
         char *tmp = strtok_r(record, "-", &record);
         if (tmp == NULL) errquit("can't get start addr");
@@ -424,11 +408,8 @@ char* get_path(char *instruction, long int *start_addr) {
 }
 
 int __libc_start_main(int (*main) (int, char * *, char * *), int argc, char * * argv, void (*init) (void), void (*fini) (void), void (*rtld_fini) (void), void (* stack_end)) {
-    // printf("argc: %d\n", argc);
-    // for (int i = 0; i < argc; i++) printf("%d %s\n", i, argv[i]);
     long int start_addr;
     char *path = get_path(argv[0], &start_addr);
-    // printf("path: %s\n", path);
     
     parse_elf(path, start_addr);
 

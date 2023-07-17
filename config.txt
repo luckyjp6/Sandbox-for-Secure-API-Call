@@ -1,10 +1,10 @@
 BEGIN open-blacklist
 /etc/passwd
-/etc/shadow
+/tmp/forbidden
 END open-blacklist
 
 BEGIN read-blacklist
------BEGIN CERTIFICATE-----
+forbidden
 END read-blacklist
 
 BEGIN connect-blacklist
