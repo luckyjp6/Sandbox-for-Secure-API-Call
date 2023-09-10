@@ -1,4 +1,4 @@
-# Sandbox for Secure API Call
+# Sandbox for Secured API Call
 此repo收錄課程「高等Unix」的大作業一。  
 透過實作sandbox.so達成library injection, API hijacking和GOT rewriting等一系列目的，實作技巧包括**parse ELF (Executable and Linkable Format)**、環境變數和shared library等。
 
